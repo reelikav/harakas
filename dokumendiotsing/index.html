@@ -68,6 +68,27 @@
 
   .result-count { font-size: 13px; color: var(--muted); margin-bottom: 10px; }
 
+  .section-label {
+    font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--muted); margin: 4px 0 8px;
+  }
+
+  .chapters-row { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 20px; }
+  .chapter-pill {
+    display: flex; align-items: center; gap: 6px;
+    padding: 8px 14px; border-radius: 8px; border: 1px solid transparent;
+    font-size: 13.5px; font-weight: 600;
+    cursor: pointer; text-align: left;
+  }
+  .chapter-pill.kodukord { background: #E7D9C4; border-color: #C9B27F; color: #6B4A1F; }
+  .chapter-pill.oppekava { background: #CFE0DA; border-color: #9FC2B4; color: #1F3A34; }
+  .chapter-pill:hover { filter: brightness(0.96); }
+  .chapter-pill .doc-mini {
+    font-size: 10px; font-weight: 700; text-transform: uppercase; opacity: 0.65;
+  }
+
+  .points-wrap .section-label { margin-top: 4px; }
+
   .result {
     background: var(--card); border: 1px solid var(--line); border-radius: 10px;
     padding: 14px 16px; margin-bottom: 10px;
@@ -121,13 +142,9 @@ const CHUNKS = JSON.parse(document.getElementById('chunks-data').textContent);
 // Sünonüümikaart: võtmed on sõnatüved (~5 esimest tähte), et tabada ka käändevorme
 const SYNONYMS = {
   'telefon': ['nutiseade', 'nutitelefon', 'mobiiltelefon', 'nutikell'],
-  'hiline': ['puudumine'],
-  'puudu': ['hilinemine'],
-  'kiusa': ['vägivald', 'ähvardamine', 'turvalisus'],
-  'vägiva': ['kiusamine'],
   'hinde': ['hindamine', 'hinne', 'kontrolltöö', 'hindeline'],
   'hindam': ['hinne', 'hindeline', 'kontrolltöö'],
-  'karistu': ['mõjutusmeede', 'noomitus', 'tugimeede'],
+  'karistu': ['mõjutusmeede', 'noomitus'],
   'mõjutusmeet': ['karistus', 'noomitus'],
   'riietu': ['rõivastus'],
   'tehisaru': ['ai', 'chatgpt', 'tehisintellekt'],
@@ -142,11 +159,28 @@ const SYN_KEYS = Object.keys(SYNONYMS);
 
 // Sagedased üld- ja küsisõnad, mis ise otsingut ei täpsusta
 const STOP = new Set([
-  'ja','või','on','kas','mis','kus','millal','kui','kaua','tohib','saab','peab','mida',
-  'kuidas','miks','see','need','oma','oli','ei','ka','et','kellel','kellele','mille',
-  'palun','ma','sa','ta','me','kes','siis','veel','juba','nüüd','koolis','kool','kooli',
-  'õpilane','õpilased','õpetaja','reeglid','reegel','kasutada','kasutamine','tohivad',
-  'tohin','peavad','võib','tuleb','seda','selle'
+  // sidesõnad, asesõnad, abiverbid, küsisõnad
+  'ja','või','ning','aga','kuid','ega','on','kas','mis','kus','millal','kui','kuivõrd',
+  'kuipalju','kelle','kellel','kellele','kellega','kust','kuhu','miks','kuidas','mille',
+  'milles','millest','milleks','mispärast','see','need','seda','selle','sellele','sellel',
+  'sellest','tema','ta','ma','sa','me','te','nad','nemad','meie','teie','kes','oma','omad',
+  'igal','iga','igaüks','mõni','mõned','kõik','kõike','muu','muud','sisse','sees','peale',
+  'ees','järgi','juures','kaudu','poolt','vastu','koos','ilma',
+  // olema/pidama/võima/saama vormid
+  'on','oli','olid','oleks','olema','olen','oled','pean','pead','peab','peame','peate',
+  'peavad','pidin','pidi','tohin','tohid','tohib','tohime','tohite','tohivad','võin',
+  'võid','võib','võime','võite','võivad','saan','saad','saab','saame','saate','saavad',
+  'tulen','tuled','tuleb','tuleme','tulete','tulevad','ei','ega','pole',
+  // sagedased määrsõnad/hulgasõnad
+  'palju','vähe','väga','natuke','pisut','mitu','mitmed','umbes','ligikaudu','täpselt',
+  'kaugele','kaua','pikalt','kiiresti','aeglaselt','alati','sageli','harva','kunagi',
+  'praegu','nüüd','siis','veel','juba','ainult','täiesti','üldse','tegelikult',
+  // viisakusväljendid ja täitesõnad
+  'palun','tänan','aitäh','vabandust','arvan','ütle','räägi','selgita','öelge',
+  // kooli/kontekstiväljendid, mis pole ise otsingu fookuses
+  'koolis','kool','kooli','koolile','koolist','koolil','õpilane','õpilased','õpilasel',
+  'õpilasele','õpetaja','õpetajal','reeglid','reegel','kasutada','kasutamine','saada',
+  'teha','tegema','tegevus'
 ]);
 
 const TOPICS = [
@@ -173,9 +207,15 @@ const fuse = new Fuse(CHUNKS, {
 });
 
 function stem(w) { return w.slice(0, Math.min(5, w.length)); }
+function matchStem(w) { return w.length > 6 ? w.slice(0, 6) : w; }
+
+// Üldsõnad võrreldakse tüvepõhiselt, et ka käänatud/pööratud kujud
+// ("kasutamise", "kasutamisel" jne) tabaksid sama "kasutamine" kirjet.
+const STOP_STEMS = new Set([...STOP].map(w => matchStem(w)));
 
 function tokenize(q) {
-  return q.toLowerCase().replace(/[?.,!]/g, '').split(/\s+/).filter(w => w.length > 2 && !STOP.has(w));
+  return q.toLowerCase().replace(/[?.,!]/g, '').split(/\s+/)
+    .filter(w => w.length > 2 && !STOP.has(w) && !STOP_STEMS.has(matchStem(w)));
 }
 
 function synonymsFor(w) {
@@ -200,43 +240,93 @@ function buildLogicalQuery(raw) {
   return andGroups.length > 1 ? { $and: andGroups } : andGroups[0];
 }
 
-// Kui täpne AND-otsing 0 tulemust annab, proovi leebemalt (OR kõigi sõnade vahel)
-function buildFallbackQuery(raw) {
+// Iga sisulise otsingusõna jaoks oma [sõna, ...sünonüümid] rühm - kasutatakse
+// range filtreerimiseks, et läbi ei pääseks Fuse'i ligikaudsed (fuzzy) vasted,
+// kus otsitud sõna/sünonüüm pole tegelikult tekstis olemas.
+function buildTermGroups(raw) {
   const words = tokenize(raw);
-  if (!words.length) return null;
+  return words.map(w => [w, ...synonymsFor(w)]);
+}
+
+function textHasTerm(text, term) {
+  return text.toLowerCase().includes(matchStem(term).toLowerCase());
+}
+function matchStem(w) { return w.length > 6 ? w.slice(0, 6) : w; }
+
+// Nõuab, et IGA otsingusõna rühma jaoks leiduks vähemalt üks täpne
+// (mitte fuzzy) sõna- või sünonüümivaste kas punkti tekstis või peatüki nimes.
+function matchesAllGroups(item, groups) {
+  const haystack = item.text + ' ' + item.heading;
+  return groups.every(group => group.some(term => term.length >= 3 && textHasTerm(haystack, term)));
+}
+
+// Kõik sõnad (+ sünonüümid) ühte nimekirja - kasutatakse
+// märgistuseks (highlight), sõltumata Fuse'i
+// sisemisest fuzzy-indeksist, mis erineb versiooniti.
+function collectTerms(raw) {
+  const words = tokenize(raw);
   let all = [...words];
   words.forEach(w => { all = all.concat(synonymsFor(w)); });
-  return [...new Set(all)].join(' | ');
+  return [...new Set(all)].filter(t => t.length >= 3);
 }
 
 function search(raw) {
   const lq = buildLogicalQuery(raw);
-  if (!lq) return [];
+  const terms = collectTerms(raw);
+  const groups = buildTermGroups(raw);
+  if (!lq) return { results: [], terms };
   let results = fuse.search(lq);
-  if (!results.length) {
-    const fq = buildFallbackQuery(raw);
-    if (fq) results = fuse.search(fq);
+  if (!results.length && terms.length) {
+    results = fuse.search(terms.join(' | '));
   }
-  return results;
+  // Range filter: jäta alles ainult punktid, kus iga otsingusõna (või selle
+  // sünonüüm) on tekstis või peatüki nimes tegelikult, sõna-sõnalt olemas.
+  results = results.filter(r => matchesAllGroups(r.item, groups));
+  return { results, terms };
 }
 
-function highlight(text, matches) {
-  if (!matches || !matches.length) return escapeHtml(text);
-  let indices = [];
-  matches.forEach(m => { if (m.key === 'text') indices = indices.concat(m.indices); });
-  if (!indices.length) return escapeHtml(text);
-  indices.sort((a, b) => a[0] - b[0]);
-  let merged = [];
-  indices.forEach(([s, e]) => {
-    if (merged.length && s <= merged[merged.length - 1][1] + 1) {
-      merged[merged.length - 1][1] = Math.max(merged[merged.length - 1][1], e);
+// Leiab kõigi teadaolevate märksõnade täpsed (mitte fuzzy) esinemiskohad
+// tekstis - sõltumatu Fuse'i sisemisest indekseerimisest. Proovib esmalt
+// täpset sõna, käändevormide jaoks langeb tagasi sõnatüvele.
+function findTermRanges(text, terms) {
+  const lower = text.toLowerCase();
+  let ranges = [];
+  terms.forEach(term => {
+    let t = term.toLowerCase();
+    if (!t) return;
+    if (!lower.includes(t)) {
+      const st = matchStem(term).toLowerCase();
+      if (st && lower.includes(st)) t = st; else return;
+    }
+    let from = 0;
+    while (true) {
+      const idx = lower.indexOf(t, from);
+      if (idx === -1) break;
+      ranges.push([idx, idx + t.length - 1]);
+      from = idx + t.length;
+    }
+  });
+  if (!ranges.length) return [];
+  ranges.sort((a, b) => a[0] - b[0]);
+  let merged = [ranges[0]];
+  for (let i = 1; i < ranges.length; i++) {
+    const [s, e] = ranges[i];
+    const last = merged[merged.length - 1];
+    if (s <= last[1] + 1) {
+      last[1] = Math.max(last[1], e);
     } else {
       merged.push([s, e]);
     }
-  });
+  }
+  return merged;
+}
+
+function highlight(text, terms) {
+  const ranges = findTermRanges(text, terms);
+  if (!ranges.length) return escapeHtml(text);
   let out = '';
   let last = 0;
-  merged.forEach(([s, e]) => {
+  ranges.forEach(([s, e]) => {
     out += escapeHtml(text.slice(last, s));
     out += '<mark>' + escapeHtml(text.slice(s, e + 1)) + '</mark>';
     last = e + 1;
@@ -249,18 +339,25 @@ function escapeHtml(s) {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
-function excerpt(text, matches, maxLen = 320) {
+function excerpt(text, terms, maxLen = 320) {
   if (text.length <= maxLen) return { text, offset: 0 };
-  let firstIdx = 0;
-  if (matches && matches.length) {
-    const textMatch = matches.find(m => m.key === 'text');
-    if (textMatch && textMatch.indices.length) firstIdx = textMatch.indices[0][0];
-  }
+  const ranges = findTermRanges(text, terms);
+  let firstIdx = ranges.length ? ranges[0][0] : 0;
   let start = Math.max(0, firstIdx - 80);
   let end = Math.min(text.length, start + maxLen);
   start = Math.max(0, end - maxLen);
   let slice = text.slice(start, end);
   return { text: (start > 0 ? '… ' : '') + slice + (end < text.length ? ' …' : ''), offset: start };
+}
+
+const PAGE_SIZE = 6;
+let state = { results: [], terms: [], shown: PAGE_SIZE, query: '' };
+
+function countMatchedTerms(text, terms) {
+  const lower = text.toLowerCase();
+  let n = 0;
+  terms.forEach(t => { if (t.length >= 3 && lower.includes(t.toLowerCase())) n++; });
+  return n;
 }
 
 function render(query) {
@@ -276,7 +373,24 @@ function render(query) {
   }
   hintEl.style.display = 'none';
 
-  const results = search(query).slice(0, 20);
+  const { results: rawResults, terms } = search(query);
+
+  // Rohkem vastavaid märksõnu = kõrgemal; Fuse'i skoor (väiksem = parem) lahendab viigid.
+  const sorted = rawResults.slice().sort((a, b) => {
+    const na = countMatchedTerms(a.item.text, terms);
+    const nb = countMatchedTerms(b.item.text, terms);
+    if (nb !== na) return nb - na;
+    return (a.score || 0) - (b.score || 0);
+  });
+
+  state = { results: sorted, terms, shown: PAGE_SIZE, query };
+  renderPage();
+}
+
+function renderPage() {
+  const resultsEl = document.getElementById('results');
+  const countEl = document.getElementById('count');
+  const { results, terms, shown } = state;
 
   if (!results.length) {
     countEl.textContent = '';
@@ -284,20 +398,39 @@ function render(query) {
     return;
   }
 
-  countEl.textContent = results.length + (results.length === 20 ? '+' : '') + ' vastet';
-
-  resultsEl.innerHTML = results.map(r => {
-    const c = r.item;
-    const { text, offset } = excerpt(c.text, r.matches);
-    // shift match indices for the excerpt window (approximate: only highlight within slice)
-    const textMatch = (r.matches || []).find(m => m.key === 'text');
-    let localMatches = null;
-    if (textMatch) {
-      const shifted = textMatch.indices
-        .map(([s, e]) => [s - offset - (text.startsWith('… ') ? 2 : 0), e - offset - (text.startsWith('… ') ? 2 : 0)])
-        .filter(([s, e]) => s >= 0 && e < text.length);
-      if (shifted.length) localMatches = [{ key: 'text', indices: shifted }];
+  // Unikaalsed peatükid tulemuste seas, esinemisjärjekorras (kõige rohkem
+  // vastavaid punkte sisaldav peatükk enne).
+  const chapterCounts = new Map();
+  results.forEach(r => {
+    const key = r.item.doc + '|||' + r.item.heading;
+    if (!chapterCounts.has(key)) {
+      chapterCounts.set(key, { doc: r.item.doc, heading: r.item.heading, count: 0 });
     }
+    chapterCounts.get(key).count++;
+  });
+  const chapters = [...chapterCounts.values()].sort((a, b) => b.count - a.count);
+
+  const visible = results.slice(0, shown);
+  countEl.textContent = results.length + ' punkti' + (results.length > shown ? ' (näidatud ' + visible.length + ')' : '');
+
+  let html = '';
+
+  if (chapters.length > 0) {
+    html += '<div class="section-label">📂 Peatükid, kus teema esineb</div>';
+    html += '<div class="chapters-row">' + chapters.map(ch => {
+      const docClass = ch.doc === 'Kodukord' ? 'kodukord' : 'oppekava';
+      return '<button class="chapter-pill ' + docClass + '" data-heading="' + escapeHtml(ch.heading) + '" data-doc="' + escapeHtml(ch.doc) + '">' +
+        '<span class="doc-mini">' + ch.doc + '</span>' +
+        escapeHtml(ch.heading) +
+        ' <span style="opacity:0.6;font-weight:400;">(' + ch.count + ')</span>' +
+        '</button>';
+    }).join('') + '</div>';
+  }
+
+  html += '<div class="points-wrap"><div class="section-label">📄 Konkreetsed punktid</div>';
+  html += visible.map(r => {
+    const c = r.item;
+    const { text } = excerpt(c.text, terms);
     const docClass = c.doc === 'Kodukord' ? 'kodukord' : 'oppekava';
     const loc = c.subheading && c.subheading !== c.heading
       ? c.heading + ' › ' + c.subheading
@@ -307,9 +440,34 @@ function render(query) {
         '<span class="doc-tag ' + docClass + '">' + c.doc + '</span>' +
         '<span class="result-heading">' + escapeHtml(loc || '') + (c.num ? ' · p. ' + c.num : '') + '</span>' +
       '</div>' +
-      '<div class="result-text">' + highlight(text, localMatches) + '</div>' +
+      '<div class="result-text">' + highlight(text, terms) + '</div>' +
     '</div>';
   }).join('');
+
+  const moreBtn = results.length > shown
+    ? '<button id="more-btn" class="topic-btn" style="width:100%;text-align:center;margin-top:4px;">Näita rohkem (' + (results.length - shown) + ')</button>'
+    : '';
+  html += moreBtn + '</div>';
+
+  resultsEl.innerHTML = html;
+
+  const moreBtnEl = document.getElementById('more-btn');
+  if (moreBtnEl) {
+    moreBtnEl.addEventListener('click', () => {
+      state.shown += 10;
+      renderPage();
+    });
+  }
+
+  resultsEl.querySelectorAll('.chapter-pill').forEach(btn => {
+    btn.addEventListener('click', () => {
+      const heading = btn.dataset.heading;
+      const doc = btn.dataset.doc;
+      state.results = state.results.filter(r => r.item.heading === heading && r.item.doc === doc);
+      state.shown = PAGE_SIZE;
+      renderPage();
+    });
+  });
 }
 
 const input = document.getElementById('q');
